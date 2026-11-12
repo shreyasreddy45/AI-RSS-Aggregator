@@ -1,0 +1,5 @@
+.env
+rss-server
+__pycache__/
+*.pyc
+.venv/

@@ -1,0 +1,101 @@
+services:
+  postgres:
+    # pgvector build of Postgres: migration 011 needs the "vector" extension.
+    image: pgvector/pgvector:pg17
+    container_name: postgres-db
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rss
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rss"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    restart: unless-stopped
+
+  redis:
+    image: redis:8
+    container_name: redis-cache
+
+    ports:
+      - "6379:6379"
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+    restart: unless-stopped
+
+  migration:
+    build:
+      context: .
+      dockerfile: migration/Dockerfile
+
+    container_name: rss-migration
+
+    env_file:
+      - .env
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: "no"
+
+  # Python AI service: summaries, embeddings, RAG, agent, semantic search.
+  # Internal only: not published to the host, reachable by the API as http://ai-service:8000.
+  ai-service:
+    build: ./ai_service
+    container_name: rss-ai-service
+
+    env_file:
+      - .env
+
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+    restart: unless-stopped
+
+  # Go API + web frontend (served at /).
+  app:
+    build: .
+    container_name: rss-server
+
+    env_file:
+      - .env
+
+    ports:
+      - "8080:8080"
+
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

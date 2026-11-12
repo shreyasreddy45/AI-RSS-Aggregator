@@ -1,0 +1,6 @@
+.git
+.env
+rss-server
+ai_service/.venv
+ai_service/**/__pycache__
+**/__pycache__
